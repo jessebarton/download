@@ -1,31 +1,34 @@
 package main
 
 import (
+	"bytes"
 	"fmt"
 	"io"
 	"log"
 	"net/http"
 	"net/url"
 	"os"
+	"path"
+	"strconv"
 	"strings"
+	"time"
 )
 
 func main() {
 	arg := os.Args[1]
 	name := getURLName(arg)
 
-	err := downloadFile(name, arg)
+	err := downloadFile(arg, "./")
 	if err != nil {
 		panic(err)
 	}
 
 	f := fileInfo(name)
 	fmt.Printf("\nName	Size\n%s	%vk\n ", f.Name(), f.Size())
-
 }
 
-func fileInfo(name string) os.FileInfo {
-	file, err := os.Open(name)
+func fileInfo(path string) os.FileInfo {
+	file, err := os.Open(path)
 	if err != nil {
 		log.Fatalf("Failed to read file: %v", err)
 	}
@@ -51,24 +54,81 @@ func getURLName(arg string) string {
 	return uriSegments[segments]
 }
 
-func downloadFile(filepath string, url string) error {
-	out, err := os.Create(filepath)
+func printDownloadPercent(done chan int64, path string, total int64) {
+	var stop = false
+
+	for {
+		select {
+		case <-done:
+			stop = true
+		default:
+			f := fileInfo(path)
+			size := f.Size()
+			if size == 0 {
+				size = 1
+			}
+
+			var percent = float64(size) / float64(total) * 100
+			fmt.Printf("%.0f%s", percent, "%")
+		}
+
+		if stop {
+			break
+		}
+
+		time.Sleep(time.Second)
+	}
+}
+
+func downloadFile(url string, dest string) error {
+	file := path.Base(url)
+
+	log.Printf("Downloading file %s from %s\n", file, url)
+
+	var path bytes.Buffer
+	path.WriteString(dest)
+	path.WriteString("/")
+	path.WriteString(file)
+
+	start := time.Now()
+
+	out, err := os.Create(path.String())
 	if err != nil {
-		return err
+		fmt.Println(path.String())
+		panic(err)
 	}
 	defer out.Close()
 
-	fmt.Printf("Downloading File: %s\n", filepath)
+	headResp, err := http.Head(url)
+	if err != nil {
+		panic(err)
+	}
+	defer headResp.Body.Close()
+
+	size, err := strconv.Atoi(headResp.Header.Get("Content-Length"))
+	if err != nil {
+		panic(err)
+	}
+
+	done := make(chan int64)
+	go printDownloadPercent(done, path.String(), int64(size))
+
 	resp, err := http.Get(url)
 	if err != nil {
-		return err
+		panic(err)
 	}
 	defer resp.Body.Close()
 
-	_, err = io.Copy(out, resp.Body)
+	n, err := io.Copy(out, resp.Body)
+
 	if err != nil {
-		return err
+		panic(err)
 	}
+
+	done <- n
+
+	elapsed := time.Since(start)
+	log.Printf("Download completed in %s", elapsed)
 
 	return nil
 }
