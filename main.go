@@ -69,7 +69,7 @@ func printDownloadPercent(done chan int64, path string, total int64) {
 			}
 
 			var percent = float64(size) / float64(total) * 100
-			fmt.Printf("%.0f%s", percent, "%")
+			fmt.Printf("%.0f%s\n", percent, "%")
 		}
 
 		if stop {
